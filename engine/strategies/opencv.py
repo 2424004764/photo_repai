@@ -1,27 +1,46 @@
-"""OpenCV 策略(策略 2 / 2.5):多模式降级 + 字节级解码。"""
+"""OpenCV 策略(策略 2 / 2.5):多模式降级 + 字节级解码。
+
+【性能关键】cv2 / numpy 不在模块顶层 import——首次调用 try_xxx 时才载入,
+避免冷启动时白白付出 ~0.5-1s 的原生扩展加载时间(打包后尤其明显)。
+"""
 from __future__ import annotations
 
 import os
+from typing import Any, Optional
 
 from constants import JPEG_OPTIMIZE_PIL, JPEG_QUALITY_PIL
 from ._context import RepairContext
 
-# opencv-python-headless 是 hard dep,可以放心顶层导入;
-# 若极端情况下没装,try/except ImportError 会兜底。
-try:
-    import cv2  # type: ignore
-    import numpy as np  # type: ignore
+# --- 进程内 cv2 / numpy 单例缓存 ---
+_cv2: Optional[Any] = None
+_np: Optional[Any] = None
+_HAS_CV2: Optional[bool] = None  # None=未尝试,True/False=结果
+
+
+def _imports() -> bool:
+    """惰性 import cv2 + numpy;记一次结果不再重试。失败返回 False。"""
+    global _cv2, _np, _HAS_CV2
+    if _HAS_CV2 is not None:
+        return _HAS_CV2
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except ImportError:  # pragma: no cover
+        _cv2 = None
+        _np = None
+        _HAS_CV2 = False
+        return False
+    _cv2 = cv2
+    _np = np
     _HAS_CV2 = True
-except ImportError:  # pragma: no cover - 兜底分支
-    cv2 = None  # type: ignore
-    np = None  # type: ignore
-    _HAS_CV2 = False
+    return True
 
 
 def try_opencv(ctx: RepairContext) -> tuple[bool, str]:
-    if not _HAS_CV2:
+    if not _imports():
         return False, "opencv-python 未安装"
 
+    cv2 = _cv2  # type: ignore[assignment]
     modes = [
         (cv2.IMREAD_UNCHANGED, "UNCHANGED"),
         (cv2.IMREAD_COLOR, "COLOR"),
@@ -50,9 +69,11 @@ def try_opencv(ctx: RepairContext) -> tuple[bool, str]:
 
 def try_opencv_bytes(ctx: RepairContext) -> tuple[bool, str]:
     """绕过文件系统层,直接读字节流给 cv2.imdecode,有时更宽容。"""
-    if not _HAS_CV2:
+    if not _imports():
         return False, "opencv-python 未安装"
 
+    cv2 = _cv2  # type: ignore[assignment]
+    np = _np    # type: ignore[assignment]
     try:
         with open(ctx.src_path, "rb") as f:
             buf = np.frombuffer(f.read(), dtype=np.uint8)

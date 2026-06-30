@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys  # ★ Bug Fix #1: 原 main.py L806 用 sys.platform 但从未 import
+import threading
 from typing import Optional
 
 import customtkinter as ctk
@@ -58,16 +59,19 @@ class ImageRepairApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         # --- 引擎状态栏 ---
-        engines = available_external_engines()
-        status_text = "外部引擎状态:  "
-        status_text += "ImageMagick ✅  " if engines["ImageMagick"] else "ImageMagick ❌(未安装)  "
-        status_text += "FFmpeg ✅" if engines["FFmpeg"] else "FFmpeg ❌(未安装)"
+        # 注:探测 ImageMagick / FFmpeg 在 Windows 上会撞 system32/convert.exe,
+        # 单次超时 1.5s,所以**绝不**在 __init__ 同步等结果——窗口先起来,
+        # 后台线程探测,回来再回填文字。
         engine_bar = ctk.CTkLabel(
-            self, text=status_text, font=("", 12),
-            text_color="lightgreen" if all(engines.values()) else ("orange" if any(engines.values()) else "red"),
+            self, text="外部引擎状态:  ⏳ 检测中...",
+            font=("", 12), text_color="gray",
         )
         engine_bar.pack(pady=(10, 0), padx=20, fill="x")
         self._engine_bar = engine_bar  # 保留引用,以后可刷新
+
+        threading.Thread(target=self._probe_engines_async, daemon=True).start()
+
+        # 模式切换之前的代码被挪到 _probe_engines_async / _render_engine_bar 里了
 
         # --- 模式切换 ---
         self.mode_var = ctk.StringVar(value="single")
@@ -161,3 +165,31 @@ class ImageRepairApp(ctk.CTk):
         else:
             self.single_frame.pack_forget()
             self.batch_frame.pack(pady=10, padx=20, fill="x")
+
+    # ----- 引擎探测(后台线程,不影响窗口弹出速度) -----
+    def _probe_engines_async(self) -> None:
+        """后台线程跑探测;命中缓存时几乎立即返回,不会拖慢首屏。"""
+        try:
+            engines = available_external_engines()
+        except Exception as e:
+            engines = {}
+            print(f"[probe_engines] {e}")
+        # Tk 不是线程安全的,必须 after(0, ...) 回到主线程改 UI
+        self.after(0, self._render_engine_bar, engines)
+
+    def _render_engine_bar(self, engines: dict[str, bool]) -> None:
+        """主线程:把探测结果画到状态栏上。"""
+        ok_im = engines.get("ImageMagick", False)
+        ok_ff = engines.get("FFmpeg", False)
+        status_text = (
+            "外部引擎状态:  "
+            f"ImageMagick {'✅' if ok_im else '❌(未安装)'}  "
+            f"FFmpeg {'✅' if ok_ff else '❌(未安装)'}"
+        )
+        if ok_im and ok_ff:
+            color = "lightgreen"
+        elif ok_im or ok_ff:
+            color = "orange"
+        else:
+            color = "red"
+        self._engine_bar.configure(text=status_text, text_color=color)

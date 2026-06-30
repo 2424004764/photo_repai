@@ -39,8 +39,16 @@ JPEG_QUALITY_IMAGEMAGICK = 95 # ImageMagick -quality 参数
 JPEG_QUALITY_FFMPEG = 1       # FFmpeg -q:v 参数(1=最高)
 
 # ---------- 超时(秒) ----------
-PROBE_TIMEOUT_SEC = 5        # 探测外部工具版本时
+PROBE_TIMEOUT_SEC = 1.5      # 探测外部工具版本时(给 `magick --version` 够用即可)
 REPAIR_TIMEOUT_SEC = 120     # 实际调用外部工具修复时
+
+# ---------- 探测缓存 ----------
+# 没装过的工具,缓存多久再重试。命中缓存则跳过 subprocess,直接返回缓存值
+# (首次没装的下次启动也不会探 → 0 秒冷启动探针)。
+PROBE_CACHE_TTL_HOURS = 24
+# 缓存文件存到用户配置目录(Windows: %APPDATA%/PhotoRepair/external_engines.json)
+APP_USER_DIR_NAME = "PhotoRepair"
+PROBE_CACHE_FILENAME = "external_engines.json"
 
 # ---------- PIL Parser / 字节扫描 ----------
 PARSER_CHUNK_BYTES = 8192    # _try_pil 第二轮 Parser.feed 的读取粒度

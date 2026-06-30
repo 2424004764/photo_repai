@@ -12,3 +12,7 @@ __pycache__/
 
 # Output
 *_fixed.jpg
+build/
+dist/
+build.spec
+PhotoRepair.spec
